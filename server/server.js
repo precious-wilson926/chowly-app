@@ -19,14 +19,12 @@ app.get('/api/staff', async (req, res) => {
 });
 
 // ---------- PLACE ORDER ----------
-// body: { table_number, items: [{ menu_item_id, quantity }] }
 app.post('/api/orders', async (req, res) => {
   const { table_number, items } = req.body;
   if (!items || items.length === 0) {
     return res.status(400).json({ error: 'Order must include at least one item' });
   }
 
-  // work out waiting time = sum of prep times for ordered items
   const ids = items.map(i => i.menu_item_id);
   const menuRows = await pool.query(
     'SELECT id, prep_time_minutes FROM menu_items WHERE id = ANY($1)',
@@ -54,7 +52,13 @@ app.post('/api/orders', async (req, res) => {
   res.status(201).json(order);
 });
 
-// ---------- GET ONE ORDER (with its items) ----------
+// ---------- GET ALL ORDERS (waiter list) ----------
+app.get('/api/orders', async (req, res) => {
+  const result = await pool.query('SELECT * FROM orders ORDER BY created_at DESC');
+  res.json(result.rows);
+});
+
+// ---------- GET ONE ORDER (with items) ----------
 app.get('/api/orders/:id', async (req, res) => {
   const orderResult = await pool.query('SELECT * FROM orders WHERE id = $1', [req.params.id]);
   if (orderResult.rowCount === 0) return res.status(404).json({ error: 'Not found' });
@@ -69,14 +73,7 @@ app.get('/api/orders/:id', async (req, res) => {
   res.json({ ...orderResult.rows[0], items: itemsResult.rows });
 });
 
-// ---------- WAITER: LIST ALL ORDERS ----------
-app.get('/api/orders', async (req, res) => {
-  const result = await pool.query('SELECT * FROM orders ORDER BY created_at DESC');
-  res.json(result.rows);
-});
-
-// ---------- WAITER: ASSIGN CHEF/BARTENDER, MARK SERVED ----------
-// body: { waiter_id, chef_id, bartender_id }
+// ---------- ASSIGN CHEF/BARTENDER/WAITER, MARK SERVED ----------
 app.patch('/api/orders/:id/assign', async (req, res) => {
   const { waiter_id, chef_id, bartender_id } = req.body;
   const result = await pool.query(
@@ -89,19 +86,21 @@ app.patch('/api/orders/:id/assign', async (req, res) => {
   res.json(result.rows[0]);
 });
 
-// ---------- CUSTOMER: COMPLAINT + RATING ----------
-// body: { complaint_text, rating }
+// ---------- RATING AND/OR COMPLAINT (independent, optional) ----------
 app.patch('/api/orders/:id/complaint', async (req, res) => {
   const { complaint_text, rating } = req.body;
   const result = await pool.query(
-    `UPDATE orders SET complaint_text = $1, rating = $2 WHERE id = $3 RETURNING *`,
-    [complaint_text, rating, req.params.id]
+    `UPDATE orders SET
+       complaint_text = COALESCE($1, complaint_text),
+       rating = COALESCE($2, rating)
+     WHERE id = $3 RETURNING *`,
+    [complaint_text ?? null, rating ?? null, req.params.id]
   );
   if (result.rowCount === 0) return res.status(404).json({ error: 'Not found' });
   res.json(result.rows[0]);
 });
 
-// ---------- CUSTOMER: PAY (pretend payment) ----------
+// ---------- PAY (pretend payment) ----------
 app.patch('/api/orders/:id/pay', async (req, res) => {
   const result = await pool.query(
     `UPDATE orders SET is_paid = true, paid_at = NOW(), status = 'paid' WHERE id = $1 RETURNING *`,
@@ -111,7 +110,7 @@ app.patch('/api/orders/:id/pay', async (req, res) => {
   res.json(result.rows[0]);
 });
 
-// ---------- SERVE THE BUILT REACT APP (Render only needs this) ----------
+// ---------- SERVE THE BUILT REACT APP (only matters once deployed) ----------
 const clientDir = path.join(__dirname, '..', 'client', 'dist');
 app.use(express.static(clientDir));
 app.use((req, res) => res.sendFile(path.join(clientDir, 'index.html')));

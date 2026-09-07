@@ -17,7 +17,15 @@ function App() {
         </button>
       </div>
 
-      {role === 'customer' ? <CustomerView /> : <WaiterView />}
+      {/* Both views stay mounted always — we only hide the inactive one.
+          This is what stops React from wiping out an order's state
+          when you switch tabs. */}
+      <div style={{ display: role === 'customer' ? 'block' : 'none' }}>
+        <CustomerView />
+      </div>
+      <div style={{ display: role === 'waiter' ? 'block' : 'none' }}>
+        <WaiterView />
+      </div>
     </div>
   )
 }
